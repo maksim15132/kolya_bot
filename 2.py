@@ -1,0 +1,511 @@
+import logging
+from random import choice
+import requests
+import json
+import time
+import os
+import sys
+import threading
+
+# ============ КОНФИГУРАЦИЯ ============
+TOKEN = "8047977819:AAHce1c6U5q90Y-aOzoyQp_niCI5aqb4aSQ"
+BASE_URL = f"https://api.telegram.org/bot{TOKEN}"
+ALPHABET_FILE = "sticker_alphabets.json"
+
+# ============ ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ============
+user_alphabets = {}
+user_states = {}
+user_current_word = {}
+save_lock = threading.Lock()
+
+# РУССКИЙ АЛФАВИТ
+RUSSIAN_ALPHABET = [
+    'А', 'Б', 'В', 'Г', 'Д', 'Е', 'Ж', 'З', 'И', 'Й',
+    'К', 'Л', 'М', 'Н', 'О', 'П', 'Р', 'С', 'Т', 'У',
+    'Ф', 'Х', 'Ц', 'Ч', 'Ш', 'Щ', 'Ъ', 'Ы', 'Ь', 'Э',
+    'Ю', 'Я'
+]
+
+# 200 СЛОВ ДЛЯ ТРЕНИРОВКИ
+WORDS = [
+    'ВЕТЕР', 'ОКНО', 'РЕЧКА', 'СОЛНЦЕ', 'ОБЛАКО', 'ДОРОГА', 'СУМКА', 'КНИГА', 'ЧАШКА', 'ВИЛКА',
+    'ЛОЖКА', 'ТАРЕЛКА', 'САЛФЕТ', 'СТАКАН', 'КОВЕР', 'СТЕНА', 'ДВЕРЬ', 'ПОТОЛОК', 'ПОЛКА', 'ДИВАН',
+    'ПОДУШКА', 'ОДЕЯЛО', 'ПРОСТЫНЬ', 'КАРМАН', 'КУРТКА', 'САПОГИ', 'ПЕРЧАТ', 'ПАЛЬТО', 'ШАПКА', 'НОСКИ',
+    'РЕМЕНЬ', 'ЗОНТИК', 'ОЧКИ', 'ДЕНЬГИ', 'БУМАГА', 'РУЧКА', 'КАРАНДАШ', 'ЛИНЕЙКА', 'ТЕТРАДЬ', 'БЛОКНОТ',
+    'ЖУРНАЛ', 'ГАЗЕТА', 'КАРТИНА', 'ФОТО', 'РАМА', 'ВАЗА', 'ЦВЕТОК', 'РАСТЕНИЕ', 'ДЕРЕВО', 'ЛИСТОК',
+    'КОРЕНЬ', 'ПЛОД', 'ЯБЛОКО', 'ГРУША', 'СЛИВА', 'ВИШНЯ', 'МОРКОВЬ', 'КАРТОФЕЛЬ', 'ПОМИДОР', 'ОГУРЕЦ',
+    'КАПУСТА', 'ЛУК', 'ЧЕСНОК', 'СВЕКЛА', 'РЕДИС', 'ТЫКВА', 'ДЫНЯ', 'АРБУЗ', 'АПЕЛЬСИН', 'МАНДАРИН',
+    'ЛИМОН', 'БАНАН', 'АНАНАС', 'КИВИ', 'ВИНОГРАД', 'ПЕРСИК', 'АБРИКОС', 'КЛУБНИКА', 'МАЛИНА', 'СМОРОДИН',
+    'КРЫЖОВНИК', 'ОРЕХ', 'ГРИБ', 'МЕД', 'САХАР', 'СОЛЬ', 'ПЕРЕЦ', 'МУКА', 'МАСЛО', 'СЫР',
+    'ТВОРОГ', 'СМЕТАНА', 'КОЛБАСА', 'СОСИСКА', 'КОТЛЕТА', 'СУП', 'БОРЩ', 'ЩИ', 'КАША', 'КОМПОТ',
+    'КИСЕЛЬ', 'КОФЕ', 'ЧАЙ', 'СОК', 'МОЛОКО', 'КЕФИР', 'РЯЖЕНКА', 'ЙОГУРТ', 'МОРОЖЕНОЕ', 'ТОРТ',
+    'ПИРОГ', 'БУЛКА', 'ПРЯНИК', 'ПЕЧЕНЬЕ', 'ВАФЛИ', 'КОНФЕТА', 'ШОКОЛАД', 'ЗЕФИР', 'МАРМЕЛАД', 'ПОСУДА',
+    'КАСТРЮЛЯ', 'СКОВОРОДА', 'ЧАЙНИК', 'КОФЕЙНИК', 'ТЕРМОС', 'МИСКА', 'СИТО', 'ДУРШЛАГ', 'НОЖ', 'ВИЛКА',
+    'ЛОЖКА', 'ПОЛОВНИК', 'РАЗДЕЛОЧ', 'ДОСКА', 'ГУБКА', 'ТРЯПКА', 'ВЕДРО', 'ШВАБРА', 'ПЫЛЕСОС', 'СТИРАЛЬН',
+    'УТЮГ', 'ЛАМПА', 'СВЕЧА', 'СПИЧКА', 'ЗАЖИГАЛК', 'КОРОБКА', 'ПАКЕТ', 'ЯЩИК', 'ЧЕМОДАН', 'РЮКЗАК',
+    'КОРЗИНА', 'ВЕЛОСИПЕД', 'МАШИНА', 'АВТОБУС', 'ТРАМВАЙ', 'ТРОЛЛЕЙБ', 'ПОЕЗД', 'САМОЛЕТ', 'КОРАБЛЬ', 'ЛОДКА',
+    'ПАРУС', 'ВЕСЛО', 'ЯКОРЬ', 'КАТЕР', 'ТЕПЛОХОД', 'ПРИЧАЛ', 'МОСТ', 'ТОННЕЛЬ', 'УЛИЦА', 'ПЛОЩАДЬ',
+    'ПЕРЕУЛОК', 'ПРОСПЕКТ', 'БУЛЬВАР', 'СКВЕР', 'ПАРК', 'САД', 'ОГОРОД', 'ПОЛЕ', 'ЛЕС', 'ГОРА',
+    'ХОЛМ', 'РЕКА', 'ОЗЕРО', 'МОРЕ', 'ОКЕАН', 'ПЛЯЖ', 'ПЕСОК', 'КАМЕНЬ', 'СКАЛА', 'ВОДОПАД',
+    'РОДНИК', 'РУЧЕЙ', 'БОЛОТО', 'ТРАВА', 'КУСТ', 'ЖУК', 'БАБОЧКА', 'СТРЕКОЗА', 'МУРАВЕЙ', 'ПЧЕЛА',
+    'ОСА', 'ШМЕЛЬ', 'КОМАР', 'МУХА', 'ПАУК', 'ЧЕРВЯК', 'УЛИТКА', 'РЫБА', 'ПТИЦА', 'СОБАКА',
+    'КОШКА', 'КОРОВА', 'ЛОШАДЬ', 'ОВЦА', 'КОЗА', 'СВИНЬЯ', 'КРОЛИК', 'КУРИЦА', 'УТКА', 'ГУСЬ',
+    'ИНДЮК', 'МЫШЬ', 'КРЫСА', 'ХОМЯК', 'ПОПУГАЙ', 'КАНАРЕЙКА', 'ЩЕГОЛ', 'СНЕГИРЬ', 'ВОРОБЕЙ', 'СИНИЦА',
+    'ГОЛУБЬ', 'ВОРОНА', 'СОРОКА', 'СОВА', 'ЯСТРЕБ', 'ОРЕЛ', 'СОКОЛ'
+]
+
+# ============ БЫСТРАЯ ЗАГРУЗКА/СОХРАНЕНИЕ ============
+def load_alphabets():
+    """Загрузка алфавитов из файла"""
+    global user_alphabets
+    try:
+        if os.path.exists(ALPHABET_FILE):
+            with open(ALPHABET_FILE, 'r', encoding='utf-8') as f:
+                user_alphabets = json.load(f)
+            print(f"✅ Загружено {len(user_alphabets)} пользователей")
+        else:
+            user_alphabets = {}
+            print("📁 Файл алфавитов создан")
+    except Exception as e:
+        print(f"⚠️ Ошибка загрузки: {e}")
+        user_alphabets = {}
+
+def save_alphabet_sync(user_id, alphabet):
+    """СИНХРОННОЕ сохранение алфавита пользователя"""
+    try:
+        with save_lock:
+            # Загружаем текущие данные
+            current_data = {}
+            if os.path.exists(ALPHABET_FILE):
+                try:
+                    with open(ALPHABET_FILE, 'r', encoding='utf-8') as f:
+                        current_data = json.load(f)
+                except:
+                    current_data = {}
+            
+            # Обновляем алфавит пользователя
+            current_data[user_id] = alphabet
+            
+            # Сохраняем обратно
+            with open(ALPHABET_FILE, 'w', encoding='utf-8') as f:
+                json.dump(current_data, f, ensure_ascii=False, indent=2)
+            
+            print(f"💾 Сохранен алфавит для {user_id}: {len(alphabet)} букв")
+            return True
+    except Exception as e:
+        print(f"❌ Ошибка сохранения для {user_id}: {e}")
+        return False
+
+def save_all_alphabets():
+    """Сохранение ВСЕХ алфавитов"""
+    try:
+        with save_lock:
+            with open(ALPHABET_FILE, 'w', encoding='utf-8') as f:
+                json.dump(user_alphabets, f, ensure_ascii=False, indent=2)
+            print(f"💾 Сохранены все алфавиты: {len(user_alphabets)} пользователей")
+    except Exception as e:
+        print(f"❌ Ошибка сохранения всех: {e}")
+
+# ============ БЫСТРЫЕ API ФУНКЦИИ ============
+def send_message_sync(chat_id, text):
+    """СИНХРОННАЯ отправка сообщения (ждем ответ)"""
+    try:
+        url = f"{BASE_URL}/sendMessage"
+        data = {
+            "chat_id": chat_id,
+            "text": text,
+            "parse_mode": "Markdown",
+            "disable_notification": True
+        }
+        response = requests.post(url, json=data, timeout=3)
+        return response.status_code == 200
+    except Exception as e:
+        print(f"⚠️ Ошибка отправки сообщения: {e}")
+        return False
+
+def send_sticker_instant(chat_id, sticker_id):
+    """Мгновенная отправка стикера"""
+    try:
+        url = f"{BASE_URL}/sendSticker"
+        data = {
+            "chat_id": chat_id,
+            "sticker": sticker_id,
+            "disable_notification": True
+        }
+        threading.Thread(
+            target=lambda: requests.post(url, json=data, timeout=1)
+        ).start()
+    except Exception as e:
+        print(f"⚠️ Ошибка отправки стикера: {e}")
+
+def send_word_with_stickers(chat_id, word, sticker_ids):
+    """Отправка слова: сначала текст, потом стикеры"""
+    # 1. Отправляем сообщение ОДНОЙ отправкой
+    message_text = f"📡 *Слово из {len(word)} букв:*\n\n"
+    message_text += "🔤 *Расшифруйте слово:*\n"
+    message_text += f"💡 Подсказка: {len(word)} букв, начинается на '{word[0]}'\n\n"
+    message_text += "👇 *Стикеры ниже:*"
+    
+    # Синхронно отправляем сообщение и ждем
+    send_message_sync(chat_id, message_text)
+    
+    # 2. Пауза для гарантии, что сообщение отобразилось
+    time.sleep(0.3)
+    
+    # 3. Отправляем все стикеры с минимальной задержкой
+    for i, sticker_id in enumerate(sticker_ids):
+        send_sticker_instant(chat_id, sticker_id)
+        if i < len(sticker_ids) - 1:
+            time.sleep(0.1)  # Минимальная задержка
+
+def get_updates_instant(offset=None):
+    """Мгновенное получение обновлений"""
+    try:
+        url = f"{BASE_URL}/getUpdates"
+        params = {"timeout": 2, "offset": offset}
+        response = requests.get(url, params=params, timeout=3)
+        if response.status_code == 200:
+            return response.json()
+    except Exception as e:
+        print(f"⚠️ Ошибка получения обновлений: {e}")
+    return {"ok": False, "result": []}
+
+# ============ ОБРАБОТКА НАСТРОЙКИ АЛФАВИТА ============
+def handle_smart_setup(chat_id):
+    """УМНАЯ настройка алфавита"""
+    user_id = str(chat_id)
+    
+    if user_id not in user_alphabets:
+        user_alphabets[user_id] = {}
+    
+    user_states[chat_id] = {
+        'current_index': 0,
+        'user_id': user_id,
+        'start_time': time.time(),
+        'current_letter': RUSSIAN_ALPHABET[0]
+    }
+    
+    send_message_sync(chat_id,
+        f"🔠 *НАСТРОЙКА АЛФАВИТА*\n\n"
+        f"Будем настраивать по порядку:\n"
+        f"А → Б → В → Г → Д → Е → ...\n\n"
+        f"📌 *Начинаем:* буква *{RUSSIAN_ALPHABET[0]}*\n"
+        f"Отправьте стикер для этой буквы"
+    )
+
+def process_setup_sticker(chat_id, sticker_id):
+    """Обработка стикера в режиме настройки"""
+    if chat_id not in user_states:
+        return
+    
+    state = user_states[chat_id]
+    current_index = state['current_index']
+    user_id = state['user_id']
+    current_letter = state['current_letter']
+    
+    if current_index < len(RUSSIAN_ALPHABET):
+        # 1. Сохраняем в памяти
+        user_alphabets[user_id][current_letter] = sticker_id
+        
+        # 2. Увеличиваем счетчик
+        next_index = current_index + 1
+        state['current_index'] = next_index
+        
+        # 3. Если набрали 8 букв - сохраняем на диск
+        if next_index % 8 == 0 and next_index > 0:
+            save_alphabet_sync(user_id, user_alphabets[user_id])
+        
+        # 4. Определяем следующую букву
+        if next_index < len(RUSSIAN_ALPHABET):
+            next_letter = RUSSIAN_ALPHABET[next_index]
+            state['current_letter'] = next_letter
+            
+            progress = next_index
+            total = len(RUSSIAN_ALPHABET)
+            
+            # Показываем прогресс каждые 4 буквы или первые 3
+            if progress % 4 == 0 or progress <= 3:
+                send_message_sync(chat_id,
+                    f"✅ *{current_letter}* сохранена! ({progress}/{total})\n"
+                    f"➡️ Следующая буква: *{next_letter}*"
+                )
+        else:
+            # ВСЕ БУКВЫ НАСТРОЕНЫ
+            save_alphabet_sync(user_id, user_alphabets[user_id])
+            
+            send_message_sync(chat_id,
+                f"🎉 *АЛФАВИТ ПОЛНОСТЬЮ НАСТРОЕН!*\n\n"
+                f"✅ Сохранено: 32/32 букв\n"
+                f"⏱️  Время: {int(time.time() - state['start_time'])} сек\n\n"
+                f"🎮 *Теперь доступны 200 слов для тренировки!*\n"
+                f"🎯 *Попробуйте:* /word"
+            )
+            
+            del user_states[chat_id]
+
+# ============ ОТПРАВКА СЛОВА ============
+def send_word_fast(chat_id):
+    """Быстрая отправка слова"""
+    user_id = str(chat_id)
+    
+    if user_id not in user_alphabets or not user_alphabets[user_id]:
+        send_message_sync(chat_id, 
+            "❌ *Сначала настройте алфавит!*\n"
+            "Отправьте: /setup"
+        )
+        return
+    
+    alphabet = user_alphabets[user_id]
+    
+    # Фильтруем слова по доступным буквам
+    available_words = []
+    for word in WORDS:
+        # Проверяем, что все буквы слова есть в алфавите
+        word_ok = True
+        for char in word:
+            if char not in alphabet:
+                word_ok = False
+                break
+        if word_ok:
+            available_words.append(word)
+    
+    if not available_words:
+        # Показываем, каких букв не хватает для случайного слова
+        random_word = choice(WORDS)
+        missing_letters = []
+        for char in random_word:
+            if char not in alphabet:
+                missing_letters.append(char)
+        
+        send_message_sync(chat_id, 
+            f"❌ *Недостаточно букв в алфавите!*\n\n"
+            f"Настроено: {len(alphabet)}/32 букв\n"
+            f"Для слова '{random_word}' не хватает:\n"
+            f"{', '.join(missing_letters)}\n\n"
+            f"⚙️ Добавьте эти буквы: /setup"
+        )
+        return
+    
+    # Выбираем слово
+    word = choice(available_words)
+    user_current_word[chat_id] = word
+    
+    print(f"📤 Отправляю слово '{word}' для {chat_id}")
+    
+    # Собираем стикеры в правильном порядке букв слова
+    sticker_ids = []
+    missing_chars = []
+    for char in word:
+        if char in alphabet:
+            sticker_ids.append(alphabet[char])
+        else:
+            missing_chars.append(char)
+    
+    if missing_chars:
+        print(f"⚠️ Ошибка: буквы {missing_chars} не найдены в алфавите")
+        send_message_sync(chat_id, f"❌ Ошибка: нет стикеров для букв {missing_chars}")
+        return
+    
+    # Отправляем слово: сначала текст, потом стикеры
+    send_word_with_stickers(chat_id, word, sticker_ids)
+
+# ============ ПРОВЕРКА ОТВЕТА ============
+def check_answer_instant(chat_id, answer):
+    """Мгновенная проверка ответа"""
+    answer = answer.strip().upper()
+    
+    if chat_id not in user_current_word:
+        send_message_sync(chat_id, "📝 Сначала получите слово: /word")
+        return
+    
+    correct = user_current_word[chat_id]
+    
+    if answer == correct:
+        send_message_sync(chat_id, f"✅ *ПРАВИЛЬНО!* {correct}")
+        send_message_sync(chat_id, "🎯 /word - следующее слово")
+        del user_current_word[chat_id]
+    else:
+        send_message_sync(chat_id,
+            f"❌ *Неправильно*\n"
+            f"Ваш ответ: {answer}\n"
+            f"Правильно: {correct}\n\n"
+            f"🔄 Попробуйте снова или /word"
+        )
+
+# ============ ДОПОЛНИТЕЛЬНЫЕ КОМАНДЫ ============
+def handle_my_alphabet(chat_id):
+    """Показать алфавит пользователя"""
+    user_id = str(chat_id)
+    
+    if user_id not in user_alphabets or not user_alphabets[user_id]:
+        send_message_sync(chat_id, 
+            "📭 *Алфавит не настроен*\n"
+            "Настройте: /setup"
+        )
+        return
+    
+    alphabet = user_alphabets[user_id]
+    letter_count = len(alphabet)
+    
+    # Формируем список букв
+    letters_list = []
+    for letter in RUSSIAN_ALPHABET:
+        if letter in alphabet:
+            letters_list.append(f"✅ {letter}")
+        else:
+            letters_list.append(f"❌ {letter}")
+    
+    # Группируем по 8
+    grouped = []
+    for i in range(0, len(letters_list), 8):
+        grouped.append(" ".join(letters_list[i:i+8]))
+    
+    alphabet_text = "📖 *ВАШ АЛФАВИТ:*\n\n"
+    alphabet_text += "\n".join(grouped)
+    alphabet_text += f"\n\n📊 *Статус:* {letter_count}/32 букв"
+    
+    if letter_count < 32:
+        alphabet_text += f"\n⚠️ *Неполный!* Добавьте буквы: /setup"
+    else:
+        alphabet_text += f"\n✅ *Полный алфавит!*\n🎮 Доступно 200 слов для тренировки!"
+    
+    send_message_sync(chat_id, alphabet_text)
+
+def handle_clear_alphabet(chat_id):
+    """Очистить алфавит"""
+    user_id = str(chat_id)
+    
+    if user_id in user_alphabets:
+        old_count = len(user_alphabets[user_id])
+        del user_alphabets[user_id]
+        
+        save_alphabet_sync(user_id, {})
+        
+        send_message_sync(chat_id,
+            f"🗑️ *Алфавит очищен!*\n"
+            f"Удалено: {old_count} букв\n"
+            f"Настройте заново: /setup"
+        )
+    else:
+        send_message_sync(chat_id, "📭 Алфавит и так пустой")
+
+# ============ ОСНОВНОЙ ЦИКЛ ============
+def main():
+    """Основной цикл работы"""
+    print("🚀 БОТ ЗАПУЩЕН!")
+    print("💾 Загружаю алфавиты...")
+    
+    load_alphabets()
+    
+    print(f"✅ Загружено: {len(user_alphabets)} пользователей")
+    print(f"📝 Слов для тренировки: {len(WORDS)}")
+    print("⚡ Готов к работе!")
+    print("-" * 40)
+    
+    offset = None
+    last_auto_save = time.time()
+    
+    while True:
+        try:
+            updates = get_updates_instant(offset)
+            
+            if updates.get("ok"):
+                for update in updates.get("result", []):
+                    offset = update["update_id"] + 1
+                    
+                    if "message" in update:
+                        msg = update["message"]
+                        chat_id = msg["chat"]["id"]
+                        user_name = msg["chat"].get("first_name", "User")
+                        # ОБРАБОТКА СТИКЕРА
+                        if "sticker" in msg:
+                            sticker_id = msg["sticker"]["file_id"]
+                            print(f"👤 {user_name}: стикер")
+                            
+                            if chat_id in user_states:
+                                process_setup_sticker(chat_id, sticker_id)
+                            else:
+                                send_message_sync(chat_id,
+                                    "🎨 Получен стикер!\n"
+                                    "Для настройки алфавита: /setup"
+                                )
+                        
+                        # ОБРАБОТКА ТЕКСТА
+                        elif "text" in msg:
+                            text = msg["text"]
+                            print(f"👤 {user_name}: {text}")
+                            
+                            if text.startswith("/"):
+                                if text == "/start":
+                                    send_message_sync(chat_id,
+                                        "🤖 *Бот семафорной азбуки*\n\n"
+                                        f"📚 *Библиотека:* 200 слов\n\n"
+                                        "⚙️ *Команды:*\n"
+                                        "/setup - настроить алфавит\n"
+                                        "/my - мой алфавит\n"
+                                        "/word - получить слово\n"
+                                        "/clear - очистить алфавит\n\n"
+                                        "⚡ *Начните с:* /setup"
+                                    )
+                                elif text == "/setup":
+                                    handle_smart_setup(chat_id)
+                                elif text == "/my":
+                                    handle_my_alphabet(chat_id)
+                                elif text == "/word":
+                                    send_word_fast(chat_id)
+                                elif text == "/clear":
+                                    handle_clear_alphabet(chat_id)
+                                elif text == "/cancel":
+                                    if chat_id in user_states:
+                                        user_id = user_states[chat_id]['user_id']
+                                        if user_id in user_alphabets:
+                                            save_alphabet_sync(user_id, user_alphabets[user_id])
+                                        del user_states[chat_id]
+                                        send_message_sync(chat_id, "❌ Настройка отменена")
+                                    else:
+                                        send_message_sync(chat_id, "ℹ️ Не в режиме настройки")
+                                elif text == "/save":
+                                    save_all_alphabets()
+                                    send_message_sync(chat_id, "💾 Все алфавиты сохранены")
+                                else:
+                                    send_message_sync(chat_id, "❓ Неизвестная команда")
+                            else:
+                                # Если пользователь в режиме настройки
+                                if chat_id in user_states:
+                                    current_letter = user_states[chat_id]['current_letter']
+                                    send_message_sync(chat_id,
+                                        f"⚠️ Сейчас настройка алфавита!\n"
+                                        f"Текущая буква: *{current_letter}*\n"
+                                        f"Отправьте стикер для этой буквы"
+                                    )
+                                else:
+                                    check_answer_instant(chat_id, text)
+                                    # Автосохранение каждые 60 секунд
+            if time.time() - last_auto_save > 60:
+                save_all_alphabets()
+                last_auto_save = time.time()
+            
+            # Минимальная задержка
+            time.sleep(0.05)
+            
+        except KeyboardInterrupt:
+            print("\n🛑 Остановка бота...")
+            print("💾 Сохраняю алфавиты...")
+            save_all_alphabets()
+            print("✅ Данные сохранены")
+            sys.exit(0)
+        except Exception as e:
+            print(f"⚠️ Ошибка в цикле: {e}")
+            time.sleep(1)
+
+# ============ ЗАПУСК ============
+if name == 'main':
+    print("=" * 50)
+    print("🤖 БОТ СЕМАФОРНОЙ АЗБУКИ С 200 СЛОВАМИ")
+    print("=" * 50)
+    print(f"📁 Файл данных: {ALPHABET_FILE}")
+    print(f"🔤 Русских букв: {len(RUSSIAN_ALPHABET)}")
+    print(f"📝 Слов для тренировки: {len(WORDS)}")
+    print("=" * 50)
+    
+    main()
