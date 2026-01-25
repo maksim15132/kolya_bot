@@ -499,7 +499,7 @@ def main():
             time.sleep(1)
 
 # ============ ЗАПУСК ============
-if name == 'main':
+if __name__ == '__main__':
     print("=" * 50)
     print("🤖 БОТ СЕМАФОРНОЙ АЗБУКИ С 200 СЛОВАМИ")
     print("=" * 50)
@@ -508,4 +508,5 @@ if name == 'main':
     print(f"📝 Слов для тренировки: {len(WORDS)}")
     print("=" * 50)
     
+
     main()
