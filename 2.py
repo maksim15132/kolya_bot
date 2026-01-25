@@ -486,7 +486,7 @@ def main():
                 last_auto_save = time.time()
             
             # Минимальная задержка
-            time.sleep(0.05)
+            time.sleep(0.09)
             
         except KeyboardInterrupt:
             print("\n🛑 Остановка бота...")
@@ -510,3 +510,4 @@ if __name__ == '__main__':
     
 
     main()
+
